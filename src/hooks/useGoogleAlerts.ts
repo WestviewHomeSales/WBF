@@ -13,7 +13,8 @@ const RSS_SOURCES = [
 
 const CACHE_KEY = 'google_alerts_cache';
 const CACHE_TIMESTAMP_KEY = 'google_alerts_timestamp';
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes - much shorter cache
+const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes - when to show stale warning
 
 // Fallback headlines for when all else fails
 const FALLBACK_HEADLINES: NewsItem[] = [
@@ -175,12 +176,15 @@ export const useGoogleAlerts = () => {
   };
 
   const fetchHeadlines = async (forceRefresh = false) => {
-    console.log(`📱 Starting mobile headline fetch - Force refresh: ${forceRefresh}`);
+    console.log(`📱 Starting mobile headline fetch - Force refresh: ${forceRefresh} - Time: ${new Date().toLocaleTimeString()}`);
     setLoading(true);
     setError(null);
 
     try {
-      // Check cache first unless force refresh
+      // Always try fresh fetch first, use cache only as emergency fallback
+      let usedCache = false;
+      
+      // Only use cache if it's very recent (under 2 minutes) and not force refresh
       if (!forceRefresh) {
         const cachedData = localStorage.getItem(CACHE_KEY);
         const cachedTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
@@ -188,15 +192,24 @@ export const useGoogleAlerts = () => {
         if (cachedData && cachedTimestamp) {
           const timestamp = parseInt(cachedTimestamp);
           const now = Date.now();
+          const cacheAge = now - timestamp;
           
-          if (now - timestamp < CACHE_DURATION) {
+          // Only use cache if it's very fresh (under 2 minutes)
+          if (cacheAge < CACHE_DURATION) {
             try {
               const parsedData = JSON.parse(cachedData);
               if (parsedData && parsedData.length > 0 && parsedData[0].link !== '#') {
-                console.log(`📱 Using cached REAL headlines: ${parsedData.length} items`);
+                console.log(`📱 Using cached REAL headlines: ${parsedData.length} items (${Math.round(cacheAge/1000)}s old)`);
                 setHeadlines(parsedData);
                 setLastUpdated(new Date(timestamp));
+                usedCache = true;
                 setLoading(false);
+                
+                // Still try to fetch fresh data in background if cache is getting old
+                if (cacheAge > 60 * 1000) { // If cache is over 1 minute old
+                  console.log('📱 Cache getting old, fetching fresh data in background...');
+                  setTimeout(() => fetchHeadlines(true), 1000);
+                }
                 return;
               }
             } catch (parseError) {
@@ -206,7 +219,7 @@ export const useGoogleAlerts = () => {
         }
       }
 
-      console.log('📱 Attempting to fetch fresh headlines...');
+      console.log('📱 Attempting to fetch fresh headlines from network...');
       
       let successfulFetch = false;
       let fetchedItems: NewsItem[] = [];
@@ -252,7 +265,7 @@ export const useGoogleAlerts = () => {
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(fetchedItems));
           localStorage.setItem(CACHE_TIMESTAMP_KEY, now.toString());
-          console.log('📱 Real headlines cached successfully');
+          console.log(`📱 Fresh headlines cached successfully at ${new Date(now).toLocaleTimeString()}`);
         } catch (storageError) {
           console.warn('📱 Could not cache data:', storageError);
         }
@@ -271,13 +284,18 @@ export const useGoogleAlerts = () => {
         try {
           const parsedData = JSON.parse(cachedData);
           if (parsedData && parsedData.length > 0 && parsedData[0].link !== '#') {
-            console.log('📱 Using expired cached REAL data as fallback');
-            setHeadlines(parsedData);
             const cachedTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+            const cacheAge = cachedTimestamp ? Date.now() - parseInt(cachedTimestamp) : 0;
+            const ageMinutes = Math.round(cacheAge / (60 * 1000));
+            
+            console.log(`📱 Using expired cached REAL data as fallback (${ageMinutes}min old)`);
+            setHeadlines(parsedData);
             if (cachedTimestamp) {
               setLastUpdated(new Date(parseInt(cachedTimestamp)));
             }
-            setError('Using cached headlines - limited connectivity');
+            setError(cacheAge > STALE_THRESHOLD ? 
+              `Headlines may be outdated (${ageMinutes}min old) - limited connectivity` : 
+              'Using cached headlines - limited connectivity');
             setLoading(false);
             return;
           }
@@ -297,16 +315,18 @@ export const useGoogleAlerts = () => {
   };
 
   useEffect(() => {
-    // Immediate fetch
-    fetchHeadlines();
+    // Always fetch fresh headlines on component mount
+    console.log('📱 Component mounted - fetching fresh headlines');
+    fetchHeadlines(true); // Force fresh fetch on every page load
   }, []);
 
   // Set up periodic refresh
   useEffect(() => {
+    // More frequent refresh interval for mobile users
     const interval = setInterval(() => {
       console.log('📱 Periodic refresh triggered');
       fetchHeadlines(true);
-    }, CACHE_DURATION);
+    }, CACHE_DURATION); // Every 2 minutes instead of 10
 
     return () => clearInterval(interval);
   }, []);

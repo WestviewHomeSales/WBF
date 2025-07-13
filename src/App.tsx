@@ -284,14 +284,19 @@ function App() {
         {/* Update info and refresh button - centered below title */}
         <div className="flex items-center justify-center gap-3 mb-8">
           {lastUpdated && (
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-gray-500" title={`Last updated: ${lastUpdated.toLocaleString()}`}>
               Updated: {formatLastUpdated(lastUpdated)}
+            </span>
+          )}
+          {error && (
+            <span className="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded">
+              ⚠️ {error.includes('outdated') ? 'Stale data' : 'Limited connectivity'}
             </span>
           )}
           <button
             onClick={refresh}
             disabled={loading}
-            className="p-2 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+            className="p-2 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 active:scale-95"
             title="Refresh headlines"
           >
             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
